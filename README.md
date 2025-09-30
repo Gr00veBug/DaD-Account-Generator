@@ -4,6 +4,7 @@
 
 # Usage
 - Get an API key from: [https://rapidapi.com/Privatix/api/temp-mail](https://rapidapi.com/Privatix/api/temp-mail)
+- Download latest exe from: [https://github.com/bditt/DaD-Account-Generator/releases](https://github.com/bditt/DaD-Account-Generator/releases)
 - Run exe.
 - Input API key.
 - Win?
