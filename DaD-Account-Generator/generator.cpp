@@ -394,6 +394,9 @@ void DaDAccountGenerator::log_account_info(const std::string& username, const st
             << "MD5 Hash of Email: " << email_hash << "\n"
             << "Creation Time: " << std::ctime(&time)
             << "Legendary: No\n"
+            << "Banned: No\n"
+            << "Temp Banned: No\n"
+            << "Notes: \n"
             << "_____________________________________________________________________\n\n";
     }
 }

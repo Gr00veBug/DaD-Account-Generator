@@ -27,6 +27,9 @@ struct AccountInfo {
     std::string emailHash;
     std::string creationTime;
     bool isLegendary = false;
+    bool isBanned = false;
+    bool isTempBanned = false;
+    std::string notes;
 };
 
 class Overlay {
@@ -52,7 +55,22 @@ private:
     char m_search_buffer[256] = "";
     std::vector<bool> m_password_visible;
     std::vector<bool> m_email_visible;
-    
+    std::vector<std::vector<char>> m_note_buffers;
+    bool m_has_active_filter = false;
+
+    struct OverlaySettings {
+        bool highlightBanned = true;
+        bool enableFilters = false;
+        bool filterShowBanned = true;
+        bool filterShowLegendary = true;
+        bool filterShowFree = true;
+        bool filterShowTempBanned = true;
+        ImVec4 bannedColor = ImVec4(1.0f, 0.2f, 0.2f, 1.0f);
+        ImVec4 tempBannedColor = ImVec4(1.0f, 0.6f, 0.0f, 1.0f);
+        ImVec4 legendaryColor = ImVec4(0.9f, 0.8f, 0.2f, 1.0f);
+        ImVec4 freeColor = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+    } m_settings;
+
     // Helper functions
     bool create_device_d3d();
     void cleanup_device_d3d();
@@ -66,15 +84,23 @@ private:
     void filter_accounts();
     void copy_to_clipboard(const std::string& text);
     std::string get_latest_verification_code(const std::string& email);
-    
+    void sync_note_buffers();
+    void update_note_buffer(size_t index);
+    std::string serialize_notes(const std::string& notes) const;
+    std::string deserialize_notes(const std::string& serialized) const;
+    size_t find_account_index(const AccountInfo& account) const;
+    std::string get_current_timestamp() const;
+
     // Config management functions
     std::string load_api_key_from_config();
     void save_api_key_to_config(const std::string& api_key);
     std::string prompt_user_for_api_key();
-    
+
     // ImGui rendering
     void render_account_window();
     void render_menu_bar();
+    void render_accounts_tab();
+    void render_settings_tab();
 
 public:
     Overlay();

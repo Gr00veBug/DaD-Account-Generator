@@ -7,11 +7,18 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <iomanip>
+#include <ctime>
+#include <limits>
 
 // Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-Overlay::Overlay() 
+namespace {
+constexpr size_t NOTE_BUFFER_SIZE = 2048;
+}
+
+Overlay::Overlay()
     : m_pd3d_device(nullptr)
     , m_pd3d_device_context(nullptr)
     , m_p_swap_chain(nullptr)
@@ -181,25 +188,22 @@ void Overlay::render_menu_bar() {
 void Overlay::render_account_window() {
     if (!m_show_account_window) return;
 
-    // Make the window fill the entire screen and act as the main window
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
-    //ImGui::SetNextWindowViewport(viewport->ID);
-    
-    ImGui::Begin("DaD Account Manager", &m_show_account_window, 
-        ImGuiWindowFlags_NoCollapse | 
-        ImGuiWindowFlags_NoResize | 
-        ImGuiWindowFlags_NoMove | 
+
+    ImGui::Begin("DaD Account Manager", &m_show_account_window,
+        ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoScrollbar |
         ImGuiWindowFlags_NoScrollWithMouse);
-    
-    // Custom title bar
+
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.2f, 0.2f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.3f, 0.3f, 0.3f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.4f, 0.4f, 0.4f, 1.0f));
-    
+
     ImGui::BeginChild("TitleBar", ImVec2(0, 30), true);
     ImGui::Text("DaD Account Manager");
     ImGui::SameLine(ImGui::GetWindowWidth() - 100);
@@ -207,11 +211,26 @@ void Overlay::render_account_window() {
         PostQuitMessage(0);
     }
     ImGui::EndChild();
-    
+
     ImGui::PopStyleColor(3);
-    
-    // Header with controls
-    ImGui::Text("Generated Accounts: %d", (int)m_accounts.size());
+
+    if (ImGui::BeginTabBar("MainTabs")) {
+        if (ImGui::BeginTabItem("Accounts")) {
+            render_accounts_tab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Settings")) {
+            render_settings_tab();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+
+    ImGui::End();
+}
+
+void Overlay::render_accounts_tab() {
+    ImGui::Text("Generated Accounts: %d", static_cast<int>(m_accounts.size()));
     ImGui::SameLine();
     if (ImGui::Button("Generate New Account")) {
         generate_new_account();
@@ -220,8 +239,7 @@ void Overlay::render_account_window() {
     if (ImGui::Button("Refresh")) {
         refresh_accounts();
     }
-    
-    // Search bar
+
     ImGui::SameLine();
     ImGui::Text("Search:");
     ImGui::SameLine();
@@ -234,189 +252,278 @@ void Overlay::render_account_window() {
         strcpy_s(m_search_buffer, "");
         filter_accounts();
     }
-    
-    ImGui::Separator();
-    
-    // Account list
-    if (m_accounts.empty()) {
-        ImGui::Text("No accounts generated yet. Click 'Generate New Account' to start.");
-    } else {
-        // Create a table for accounts with proper column sizing
-        if (ImGui::BeginTable("Accounts", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY)) {
-            ImGui::TableSetupColumn("Username", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-            ImGui::TableSetupColumn("Email", ImGuiTableColumnFlags_WidthStretch, 1.5f);
-            ImGui::TableSetupColumn("Password", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-            ImGui::TableSetupColumn("Legendary", ImGuiTableColumnFlags_WidthFixed, 100.0f);
-            ImGui::TableSetupColumn("Created", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-            ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 300.0f);
-            ImGui::TableHeadersRow();
 
-            // Use filtered accounts for display
-            const auto& display_accounts = m_filtered_accounts.empty() && strlen(m_search_buffer) == 0 ? m_accounts : m_filtered_accounts;
-            
-            for (size_t i = 0; i < display_accounts.size(); ++i) {
-                const auto& account = display_accounts[i];
-                
-                ImGui::TableNextRow();
-                
-                // Username
-                ImGui::TableSetColumnIndex(0);
-                ImGui::Text("%s", account.username.c_str());
-                
-                // Email
-                ImGui::TableSetColumnIndex(1);
-                
-                // Find the index in the main accounts list for email visibility
-                size_t email_main_index = 0;
-                for (size_t j = 0; j < m_accounts.size(); ++j) {
-                    if (m_accounts[j].username == account.username && m_accounts[j].email == account.email) {
-                        email_main_index = j;
-                        break;
-                    }
-                }
-                
-                // Ensure email visibility array is large enough
-                if (email_main_index >= m_email_visible.size()) {
-                    m_email_visible.resize(email_main_index + 1, false);
-                }
-                
-                // Display email (blurred or visible)
-                if (m_email_visible[email_main_index]) {
-                    // Show actual email
-                    ImGui::Text("%s", account.email.c_str());
-                } else {
-                    // Show blurred email with first 5 characters visible
-                    std::string display_email;
-                    if (account.email.length() <= 5) {
-                        display_email = account.email; // Show full email if 5 chars or less
-                    } else {
-                        display_email = account.email.substr(0, 5);
-                        display_email += std::string(account.email.length() - 5, '*');
-                    }
-                    ImGui::Text("%s", display_email.c_str());
-                }
-                
-                // Make the email clickable to toggle visibility
-                if (ImGui::IsItemClicked()) {
-                    m_email_visible[email_main_index] = !m_email_visible[email_main_index];
-                }
-                
-                // Password
-                ImGui::TableSetColumnIndex(2);
-                
-                // Find the index in the main accounts list for password visibility
-                size_t password_main_index = 0;
-                for (size_t j = 0; j < m_accounts.size(); ++j) {
-                    if (m_accounts[j].username == account.username && m_accounts[j].email == account.email) {
-                        password_main_index = j;
-                        break;
-                    }
-                }
-                
-                // Ensure password visibility array is large enough
-                if (password_main_index >= m_password_visible.size()) {
-                    m_password_visible.resize(password_main_index + 1, false);
-                }
-                
-                // Display password (blurred or visible)
-                if (m_password_visible[password_main_index]) {
-                    // Show actual password
-                    ImGui::Text("%s", account.password.c_str());
-                } else {
-                    // Show blurred password
-                    std::string blurred_password(account.password.length(), '*');
-                    ImGui::Text("%s", blurred_password.c_str());
-                }
-                
-                // Make the password clickable to toggle visibility
-                if (ImGui::IsItemClicked()) {
-                    m_password_visible[password_main_index] = !m_password_visible[password_main_index];
-                }
-                
-                // Legendary status display
-                ImGui::TableSetColumnIndex(3);
-                std::string legendary_button_id = "##Legendary" + std::to_string(i);
-                std::string legendary_text = account.isLegendary ? "Legendary" : "Free";
-                if (ImGui::Button((legendary_text + legendary_button_id).c_str())) {
-                    // Toggle legendary status when clicked
-                    // Find the account in the main accounts list and update it
-                    for (auto& main_account : m_accounts) {
-                        if (main_account.username == account.username && main_account.email == account.email) {
-                            main_account.isLegendary = !main_account.isLegendary;
-                            break;
-                        }
-                    }
-                    save_accounts_to_file();
-                }
-                
-                // Creation Time
-                ImGui::TableSetColumnIndex(4);
-                ImGui::Text("%s", account.creationTime.c_str());
-                
-                // Actions - Use vertical layout for better fit
-                ImGui::TableSetColumnIndex(5);
-                
-                // First row of buttons
-                if (ImGui::Button(("Copy Email##" + std::to_string(i)).c_str())) {
-                    copy_to_clipboard(account.email);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button(("Copy Pass##" + std::to_string(i)).c_str())) {
-                    copy_to_clipboard(account.password);
-                }
-                
-                // Second row of buttons
-                if (ImGui::Button(("Grab Code##" + std::to_string(i)).c_str())) {
-                    std::string latest_code = get_latest_verification_code(account.email);
-                    if (!latest_code.empty()) {
-                        copy_to_clipboard(latest_code);
-                        // Update the account with the latest code
-                        m_accounts[i].verificationCode = latest_code;
-                        save_accounts_to_file();
-                    }
-                }
-                ImGui::SameLine();
-                if (ImGui::Button(("Delete##" + std::to_string(i)).c_str())) {
-                    // Add delete functionality if needed
-                    ImGui::OpenPopup(("Delete Account##" + std::to_string(i)).c_str());
-                }
-                
-                // Delete confirmation popup
-                if (ImGui::BeginPopupModal(("Delete Account##" + std::to_string(i)).c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                    ImGui::Text("Are you sure you want to delete this account?");
-                    ImGui::Text("Username: %s", account.username.c_str());
-                    ImGui::Text("Email: %s", account.email.c_str());
-                    ImGui::Separator();
-                    
-                    if (ImGui::Button("Yes, Delete", ImVec2(120, 0))) {
-                        m_accounts.erase(m_accounts.begin() + i);
-                        save_accounts_to_file();
-                        ImGui::CloseCurrentPopup();
-                    }
-                    ImGui::SetItemDefaultFocus();
-                    ImGui::SameLine();
-                    if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-                        ImGui::CloseCurrentPopup();
-                    }
-                    ImGui::EndPopup();
-                }
-            }
-            ImGui::EndTable();
+    if (m_settings.enableFilters) {
+        ImGui::Separator();
+        ImGui::Text("Filters:");
+        if (ImGui::Checkbox("Show Banned", &m_settings.filterShowBanned)) {
+            filter_accounts();
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Show Legendary", &m_settings.filterShowLegendary)) {
+            filter_accounts();
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Show Free", &m_settings.filterShowFree)) {
+            filter_accounts();
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Show Temp Banned", &m_settings.filterShowTempBanned)) {
+            filter_accounts();
         }
     }
-    
-    ImGui::End();
+
+    ImGui::Separator();
+
+    if (m_accounts.empty()) {
+        ImGui::Text("No accounts generated yet. Click 'Generate New Account' to start.");
+        return;
+    }
+
+    if (m_email_visible.size() < m_accounts.size()) {
+        m_email_visible.resize(m_accounts.size(), false);
+    }
+    if (m_password_visible.size() < m_accounts.size()) {
+        m_password_visible.resize(m_accounts.size(), false);
+    }
+
+    const auto& display_accounts = m_has_active_filter ? m_filtered_accounts : m_accounts;
+
+    bool needs_filter_refresh = false;
+
+    if (ImGui::BeginTable("Accounts", 7, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY)) {
+        ImGui::TableSetupColumn("Username", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Email", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+        ImGui::TableSetupColumn("Password", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Account Type", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+        ImGui::TableSetupColumn("Ban Status", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("Created", ImGuiTableColumnFlags_WidthStretch, 1.2f);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 320.0f);
+        ImGui::TableHeadersRow();
+
+        for (size_t i = 0; i < display_accounts.size(); ++i) {
+            const auto& account = display_accounts[i];
+            size_t main_index = find_account_index(account);
+            if (main_index == std::numeric_limits<size_t>::max()) {
+                continue;
+            }
+
+            ImGui::TableNextRow();
+
+            ImVec4 rowColor = m_settings.freeColor;
+            if (account.isLegendary) {
+                rowColor = m_settings.legendaryColor;
+            }
+            if (account.isTempBanned) {
+                rowColor = m_settings.tempBannedColor;
+            }
+            if (m_settings.highlightBanned && account.isBanned) {
+                rowColor = m_settings.bannedColor;
+            }
+
+            ImGui::PushStyleColor(ImGuiCol_Text, rowColor);
+
+            // Username
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(account.username.c_str());
+
+            // Email
+            ImGui::TableSetColumnIndex(1);
+            bool emailVisible = m_email_visible[main_index];
+            if (emailVisible) {
+                ImGui::TextUnformatted(account.email.c_str());
+            } else {
+                std::string display_email;
+                if (account.email.length() <= 5) {
+                    display_email = account.email;
+                } else {
+                    display_email = account.email.substr(0, 5);
+                    display_email += std::string(account.email.length() - 5, '*');
+                }
+                ImGui::TextUnformatted(display_email.c_str());
+            }
+            if (ImGui::IsItemClicked()) {
+                m_email_visible[main_index] = !emailVisible;
+            }
+
+            // Password
+            ImGui::TableSetColumnIndex(2);
+            bool passwordVisible = m_password_visible[main_index];
+            if (passwordVisible) {
+                ImGui::TextUnformatted(account.password.c_str());
+            } else {
+                std::string blurred_password(account.password.length(), '*');
+                ImGui::TextUnformatted(blurred_password.c_str());
+            }
+            if (ImGui::IsItemClicked()) {
+                m_password_visible[main_index] = !passwordVisible;
+            }
+
+            // Account type
+            ImGui::TableSetColumnIndex(3);
+            std::string legendary_text = account.isLegendary ? "Legendary" : "Free";
+            std::string legendary_button_id = legendary_text + "##Legendary" + std::to_string(i);
+            if (ImGui::Button(legendary_button_id.c_str())) {
+                m_accounts[main_index].isLegendary = !m_accounts[main_index].isLegendary;
+                save_accounts_to_file();
+                needs_filter_refresh = true;
+            }
+
+            // Ban controls
+            ImGui::TableSetColumnIndex(4);
+            std::string ban_label = (account.isBanned ? "Unban" : "Ban");
+            if (ImGui::Button((ban_label + "##Ban" + std::to_string(i)).c_str())) {
+                m_accounts[main_index].isBanned = !m_accounts[main_index].isBanned;
+                save_accounts_to_file();
+                needs_filter_refresh = true;
+            }
+            std::string temp_label = (account.isTempBanned ? "Clear Temp" : "Temp Ban");
+            if (ImGui::Button((temp_label + "##Temp" + std::to_string(i)).c_str())) {
+                bool new_state = !m_accounts[main_index].isTempBanned;
+                m_accounts[main_index].isTempBanned = new_state;
+                if (new_state) {
+                    if (!m_accounts[main_index].notes.empty()) {
+                        m_accounts[main_index].notes += "\n";
+                    }
+                    m_accounts[main_index].notes += "Temp banned at " + get_current_timestamp();
+                }
+                update_note_buffer(main_index);
+                save_accounts_to_file();
+                needs_filter_refresh = true;
+            }
+
+            // Creation Time
+            ImGui::TableSetColumnIndex(5);
+            ImGui::TextUnformatted(account.creationTime.c_str());
+
+            // Actions
+            ImGui::TableSetColumnIndex(6);
+            if (ImGui::Button(("Copy Email##" + std::to_string(i)).c_str())) {
+                copy_to_clipboard(account.email);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(("Copy Pass##" + std::to_string(i)).c_str())) {
+                copy_to_clipboard(account.password);
+            }
+
+            if (ImGui::Button(("Grab Code##" + std::to_string(i)).c_str())) {
+                std::string latest_code = get_latest_verification_code(account.email);
+                if (!latest_code.empty()) {
+                    copy_to_clipboard(latest_code);
+                    m_accounts[main_index].verificationCode = latest_code;
+                    save_accounts_to_file();
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(("Delete##" + std::to_string(i)).c_str())) {
+                ImGui::OpenPopup(("Delete Account##" + std::to_string(i)).c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(("Edit Notes##" + std::to_string(i)).c_str())) {
+                ImGui::OpenPopup(("Notes##" + std::to_string(i)).c_str());
+                update_note_buffer(main_index);
+            }
+
+            if (ImGui::BeginPopupModal(("Notes##" + std::to_string(i)).c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                auto& note_buffer = m_note_buffers[main_index];
+                if (note_buffer.empty()) {
+                    update_note_buffer(main_index);
+                }
+                ImGui::InputTextMultiline("##NotesInput", note_buffer.data(), note_buffer.size(), ImVec2(400.0f, 200.0f));
+                if (ImGui::Button("Save Notes")) {
+                    m_accounts[main_index].notes = std::string(note_buffer.data());
+                    update_note_buffer(main_index);
+                    save_accounts_to_file();
+                    needs_filter_refresh = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Close")) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+
+            if (ImGui::BeginPopupModal(("Delete Account##" + std::to_string(i)).c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::Text("Are you sure you want to delete this account?");
+                ImGui::Text("Username: %s", account.username.c_str());
+                ImGui::Text("Email: %s", account.email.c_str());
+                ImGui::Separator();
+
+                if (ImGui::Button("Yes, Delete", ImVec2(120, 0))) {
+                    m_accounts.erase(m_accounts.begin() + main_index);
+                    if (main_index < m_password_visible.size()) {
+                        m_password_visible.erase(m_password_visible.begin() + main_index);
+                    }
+                    if (main_index < m_email_visible.size()) {
+                        m_email_visible.erase(m_email_visible.begin() + main_index);
+                    }
+                    if (main_index < m_note_buffers.size()) {
+                        m_note_buffers.erase(m_note_buffers.begin() + main_index);
+                    }
+                    save_accounts_to_file();
+                    needs_filter_refresh = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SetItemDefaultFocus();
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::EndTable();
+    }
+
+    if (needs_filter_refresh) {
+        filter_accounts();
+    }
+}
+
+void Overlay::render_settings_tab() {
+    ImGui::Text("Appearance");
+    ImGui::Separator();
+    ImGui::Checkbox("Highlight banned accounts", &m_settings.highlightBanned);
+    ImGui::ColorEdit3("Banned Color", reinterpret_cast<float*>(&m_settings.bannedColor));
+    ImGui::ColorEdit3("Temp Banned Color", reinterpret_cast<float*>(&m_settings.tempBannedColor));
+    ImGui::ColorEdit3("Legendary Color", reinterpret_cast<float*>(&m_settings.legendaryColor));
+    ImGui::ColorEdit3("Free Color", reinterpret_cast<float*>(&m_settings.freeColor));
+
+    ImGui::Spacing();
+    ImGui::Text("Filtering");
+    ImGui::Separator();
+    if (ImGui::Checkbox("Enable Filters", &m_settings.enableFilters)) {
+        filter_accounts();
+    }
+    if (m_settings.enableFilters) {
+        if (ImGui::Checkbox("Show Banned Accounts", &m_settings.filterShowBanned)) {
+            filter_accounts();
+        }
+        if (ImGui::Checkbox("Show Legendary Accounts", &m_settings.filterShowLegendary)) {
+            filter_accounts();
+        }
+        if (ImGui::Checkbox("Show Free Accounts", &m_settings.filterShowFree)) {
+            filter_accounts();
+        }
+        if (ImGui::Checkbox("Show Temp Banned Accounts", &m_settings.filterShowTempBanned)) {
+            filter_accounts();
+        }
+    }
 }
 
 void Overlay::load_accounts_from_file() {
     m_accounts.clear();
     std::ifstream file("DaDAccounts.txt");
     if (!file.is_open()) return;
-    
+
     std::string line;
     AccountInfo current_account;
     bool in_account = false;
-    
+
     while (std::getline(file, line)) {
         if (line.find("Username: ") == 0) {
             if (in_account) {
@@ -440,48 +547,99 @@ void Overlay::load_accounts_from_file() {
         } else if (line.find("Legendary: ") == 0) {
             std::string legendary_str = line.substr(11);
             current_account.isLegendary = (legendary_str == "Yes" || legendary_str == "true" || legendary_str == "1");
+        } else if (line.find("Banned: ") == 0) {
+            std::string banned_str = line.substr(8);
+            current_account.isBanned = (banned_str == "Yes" || banned_str == "true" || banned_str == "1");
+        } else if (line.find("Temp Banned: ") == 0) {
+            std::string temp_str = line.substr(13);
+            current_account.isTempBanned = (temp_str == "Yes" || temp_str == "true" || temp_str == "1");
+        } else if (line.find("Notes: ") == 0) {
+            current_account.notes = deserialize_notes(line.substr(7));
         }
     }
-    
-    // Add the last account if we were in the middle of reading one
+
     if (in_account) {
         m_accounts.push_back(current_account);
     }
-    
+
     file.close();
-    
-    // Initialize visibility arrays
-    m_password_visible.resize(m_accounts.size(), false);
-    m_email_visible.resize(m_accounts.size(), false);
-    
-    // Apply current search filter
+
+    m_password_visible.assign(m_accounts.size(), false);
+    m_email_visible.assign(m_accounts.size(), false);
+
+    sync_note_buffers();
     filter_accounts();
 }
 
 void Overlay::filter_accounts() {
     m_filtered_accounts.clear();
-    
-    if (strlen(m_search_buffer) == 0) {
-        return; // Show all accounts when search is empty
-    }
-    
+
     std::string search_term = m_search_buffer;
-    std::transform(search_term.begin(), search_term.end(), search_term.begin(), ::tolower);
-    
+    bool has_search = !search_term.empty();
+    if (has_search) {
+        std::transform(search_term.begin(), search_term.end(), search_term.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+    }
+
+    bool filters_enabled = m_settings.enableFilters && (
+        !m_settings.filterShowBanned ||
+        !m_settings.filterShowLegendary ||
+        !m_settings.filterShowFree ||
+        !m_settings.filterShowTempBanned
+    );
+
+    m_has_active_filter = has_search || filters_enabled;
+
+    if (!m_has_active_filter) {
+        return;
+    }
+
+    auto to_lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    };
+
     for (const auto& account : m_accounts) {
-        std::string username = account.username;
-        std::string email = account.email;
-        std::string password = account.password;
-        std::string legendary = account.isLegendary ? "legendary" : "free";
-        
-        std::transform(username.begin(), username.end(), username.begin(), ::tolower);
-        std::transform(email.begin(), email.end(), email.begin(), ::tolower);
-        std::transform(password.begin(), password.end(), password.begin(), ::tolower);
-        
-        if (username.find(search_term) != std::string::npos ||
-            email.find(search_term) != std::string::npos ||
-            password.find(search_term) != std::string::npos ||
-            legendary.find(search_term) != std::string::npos) {
+        bool matches_search = true;
+        if (has_search) {
+            std::string username = to_lower(account.username);
+            std::string email = to_lower(account.email);
+            std::string password = to_lower(account.password);
+            std::string notes = to_lower(account.notes);
+            std::string legendary = account.isLegendary ? "legendary" : "free";
+            std::string legendary_lower = to_lower(legendary);
+            std::string banned_state = account.isBanned ? "banned" : "active";
+            std::string temp_state = account.isTempBanned ? "temp banned" : "";
+
+            matches_search = (username.find(search_term) != std::string::npos) ||
+                (email.find(search_term) != std::string::npos) ||
+                (password.find(search_term) != std::string::npos) ||
+                (notes.find(search_term) != std::string::npos) ||
+                (legendary_lower.find(search_term) != std::string::npos) ||
+                (to_lower(banned_state).find(search_term) != std::string::npos) ||
+                (!temp_state.empty() && to_lower(temp_state).find(search_term) != std::string::npos);
+        }
+
+        bool matches_filters = true;
+        if (m_settings.enableFilters) {
+            if (account.isBanned && !m_settings.filterShowBanned) {
+                matches_filters = false;
+            }
+            if (account.isLegendary && !m_settings.filterShowLegendary) {
+                matches_filters = false;
+            }
+            if (!account.isLegendary && !m_settings.filterShowFree) {
+                matches_filters = false;
+            }
+            if (account.isTempBanned && !m_settings.filterShowTempBanned) {
+                matches_filters = false;
+            }
+        }
+
+        if (matches_search && matches_filters) {
             m_filtered_accounts.push_back(account);
         }
     }
@@ -490,7 +648,7 @@ void Overlay::filter_accounts() {
 void Overlay::save_accounts_to_file() {
     std::ofstream file("DaDAccounts.txt");
     if (!file.is_open()) return;
-    
+
     for (const auto& account : m_accounts) {
         file << "Username: " << account.username << "\n"
              << "Email: " << account.email << "\n"
@@ -500,10 +658,85 @@ void Overlay::save_accounts_to_file() {
              << "MD5 Hash of Email: " << account.emailHash << "\n"
              << "Creation Time: " << account.creationTime << "\n"
              << "Legendary: " << (account.isLegendary ? "Yes" : "No") << "\n"
+             << "Banned: " << (account.isBanned ? "Yes" : "No") << "\n"
+             << "Temp Banned: " << (account.isTempBanned ? "Yes" : "No") << "\n"
+             << "Notes: " << serialize_notes(account.notes) << "\n"
              << "_____________________________________________________________________\n\n";
     }
-    
+
     file.close();
+}
+
+void Overlay::sync_note_buffers() {
+    m_note_buffers.resize(m_accounts.size());
+    for (size_t i = 0; i < m_accounts.size(); ++i) {
+        update_note_buffer(i);
+    }
+}
+
+void Overlay::update_note_buffer(size_t index) {
+    if (index >= m_accounts.size()) {
+        return;
+    }
+    if (index >= m_note_buffers.size()) {
+        m_note_buffers.resize(index + 1);
+    }
+
+    auto& buffer = m_note_buffers[index];
+    const std::string& notes = m_accounts[index].notes;
+    buffer.clear();
+    buffer.insert(buffer.end(), notes.begin(), notes.end());
+    buffer.push_back('\0');
+    size_t desired_size = std::max(notes.size() + 1, NOTE_BUFFER_SIZE);
+    if (buffer.size() < desired_size) {
+        buffer.resize(desired_size, '\0');
+    }
+}
+
+std::string Overlay::serialize_notes(const std::string& notes) const {
+    std::string result;
+    result.reserve(notes.size());
+    for (char ch : notes) {
+        if (ch == '\n') {
+            result += "\\n";
+        } else if (ch != '\r') {
+            result += ch;
+        }
+    }
+    return result;
+}
+
+std::string Overlay::deserialize_notes(const std::string& serialized) const {
+    std::string result;
+    result.reserve(serialized.size());
+    for (size_t i = 0; i < serialized.size(); ++i) {
+        if (serialized[i] == '\\' && i + 1 < serialized.size() && serialized[i + 1] == 'n') {
+            result += '\n';
+            ++i;
+        } else {
+            result += serialized[i];
+        }
+    }
+    return result;
+}
+
+size_t Overlay::find_account_index(const AccountInfo& account) const {
+    for (size_t i = 0; i < m_accounts.size(); ++i) {
+        if (m_accounts[i].username == account.username && m_accounts[i].email == account.email) {
+            return i;
+        }
+    }
+    return std::numeric_limits<size_t>::max();
+}
+
+std::string Overlay::get_current_timestamp() const {
+    auto now = std::chrono::system_clock::now();
+    std::time_t time_now = std::chrono::system_clock::to_time_t(now);
+    std::tm local_tm{};
+    localtime_s(&local_tm, &time_now);
+    std::ostringstream oss;
+    oss << std::put_time(&local_tm, "%Y-%m-%d %H:%M:%S");
+    return oss.str();
 }
 
 void Overlay::copy_to_clipboard(const std::string& text) {
@@ -536,7 +769,10 @@ void Overlay::add_account(const AccountInfo& account) {
     m_accounts.push_back(account);
     m_password_visible.push_back(false); // New accounts start with hidden passwords
     m_email_visible.push_back(false); // New accounts start with hidden emails
+    m_note_buffers.emplace_back();
+    update_note_buffer(m_accounts.size() - 1);
     save_accounts_to_file();
+    filter_accounts();
 }
 
 void Overlay::refresh_accounts() {
